@@ -1,0 +1,12 @@
+extends:
+  - recommended
+
+rules:
+  # Localhost server is intentional for local Hono development.
+  no-server-example.com: off
+  # The license is an educational project without a public URL.
+  info-license-strict: off
+  # Not every endpoint documents all 4xx branches; the global error shape is in components.
+  operation-4xx-response: off
+  # 302 redirect for invoice PDF is intentional.
+  operation-2xx-response: off

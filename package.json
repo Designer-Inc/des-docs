@@ -1,0 +1,16 @@
+{
+  "name": "des-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint:openapi": "redocly lint openapi.yaml",
+    "check:types": "openapi-typescript openapi.yaml -o .tmp/api.d.ts",
+    "check": "bun run lint:openapi && bun run check:types",
+    "build:docs": "redocly build-docs openapi.yaml -o dist/index.html",
+    "preview:docs": "redocly preview-docs openapi.yaml"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.75.0",
+    "openapi-typescript": "^7.13.0"
+  }
+}

@@ -1,0 +1,5358 @@
+openapi: 3.0.3
+info:
+  title: «Дизайнер» API
+  version: 1.0.0
+  description: |
+    REST API вебплатформи персоналізованих товарів «Дизайнер».
+
+    Контракт є спільним для frontend і backend. Правила:
+    - JSON, camelCase, UTF-8.
+    - Гроші в цілих копійках (`*Minor`), валюта UAH.
+    - Час ISO 8601 UTC.
+    - Помилки мають форму `{ "error": { "code", "message", "details", "requestId" } }`.
+    - Списки посторінкові: `{ items, page, limit, total, hasMore }`.
+    - Access JWT 15 хвилин, refresh token у HttpOnly cookie 7 діб.
+    - Ролі перевіряються backend-ом; розширення `x-required-roles` описує мінімум.
+  contact:
+    name: Команда «Стиляги»
+    email: gtsasuk@gmail.com
+  license:
+    name: Educational project
+servers:
+  - url: https://api.dyzainer.ua
+    description: Production
+  - url: http://localhost:8787
+    description: Local Hono worker
+tags:
+  - name: Auth
+    description: Реєстрація, вхід, refresh, відновлення пароля
+  - name: Users
+    description: Профіль, компанія, файли, винагорода, сповіщення
+  - name: Config
+    description: Публічні шрифти, ліміти та версії текстів
+  - name: Catalog
+    description: Категорії, товари, опубліковані дизайни, пошук
+  - name: Delivery
+    description: Довідники та розрахунок Нової Пошти
+  - name: Cart
+    description: Розрахунок кошика без збереження на сервері
+  - name: Uploads
+    description: Signed upload, перевірка файлів, видалення
+  - name: Designs
+    description: Чернетки, fork, публікація, статистика, скарги
+  - name: Personalization
+    description: Списки імен і перевірка найдовшого імені
+  - name: Orders
+    description: Замовлення, скасування, рахунок, відправлення
+  - name: Payments
+    description: Платіжні посилання, статуси, webhook
+  - name: Moderation
+    description: Черги дизайнів і замовлень, скарги
+  - name: Admin
+    description: Каталог, замовлення, друк, користувачі, аудит
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Config]
+      operationId: getHealth
+      summary: Перевірка живості та доступності БД
+      description: |
+        Використовується uptime-монітором і GitHub Action keep-alive.
+        Не вимагає авторизації, не розкриває секретів.
+      security: []
+      responses:
+        '200':
+          description: Сервіс живий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerUser
+      summary: Реєстрація покупця
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Акаунт створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginUser
+      summary: Вхід за email і паролем
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Сесія створена, refresh token у Set-Cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/auth
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Ротація refresh token
+      security:
+        - refreshCookie: []
+      responses:
+        '200':
+          description: Новий access token
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutUser
+      summary: Вихід і відкликання сесії
+      security:
+        - refreshCookie: []
+      responses:
+        '204':
+          description: Сесію завершено
+
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Запит на відновлення пароля
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '204':
+          description: Лист надіслано або email не існує (відповідь однакова)
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Встановлення нового пароля за токеном
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 72
+                  pattern: '^(?=.*[0-9]).{8,72}$'
+      responses:
+        '204':
+          description: Пароль змінено
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/email/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyEmail
+      summary: Підтвердження email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Email підтверджено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/oauth/google:
+    post:
+      tags: [Auth]
+      operationId: loginWithGoogle
+      summary: Вхід через Google ID token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idToken]
+              properties:
+                idToken:
+                  type: string
+      responses:
+        '200':
+          description: Сесія створена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Поточний користувач і права
+      responses:
+        '200':
+          description: Профіль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me:
+    patch:
+      tags: [Users]
+      operationId: updateMyProfile
+      summary: Оновлення профілю
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Оновлений профіль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Users]
+      operationId: deleteMyAccount
+      summary: Видалення акаунта
+      description: Акаунт блокується, персональні дані анонімізуються протягом 30 днів.
+      responses:
+        '202':
+          description: Запит прийнято
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/company:
+    get:
+      tags: [Users]
+      operationId: getMyCompany
+      summary: Реквізити компанії
+      responses:
+        '200':
+          description: Реквізити
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyProfile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Users]
+      operationId: upsertMyCompany
+      summary: Створення або заміна реквізитів
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanyProfileInput'
+      responses:
+        '200':
+          description: Реквізити збережено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyProfile'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /users/me/files:
+    get:
+      tags: [Users]
+      operationId: listMyFiles
+      summary: Мої файли
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: kind
+          in: query
+          schema:
+            $ref: '#/components/schemas/FileKind'
+      responses:
+        '200':
+          description: Файли
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileList'
+
+  /users/me/earnings:
+    get:
+      tags: [Users]
+      operationId: getMyEarnings
+      summary: Винагорода автора
+      responses:
+        '200':
+          description: Нарахування
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Earnings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/stats:
+    get:
+      tags: [Users]
+      operationId: getMyStats
+      summary: Статистика автора
+      responses:
+        '200':
+          description: Статистика
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorStats'
+
+  /notifications:
+    get:
+      tags: [Users]
+      operationId: listMyNotifications
+      summary: Сповіщення
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Сповіщення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationList'
+
+  /notifications/{notificationId}:
+    patch:
+      tags: [Users]
+      operationId: markNotificationRead
+      summary: Позначити сповіщення прочитаним
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [read]
+              properties:
+                read:
+                  type: boolean
+                  enum: [true]
+      responses:
+        '200':
+          description: Оновлене сповіщення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+
+  /notifications/read-all:
+    post:
+      tags: [Users]
+      operationId: markAllNotificationsRead
+      summary: Позначити всі сповіщення прочитаними
+      responses:
+        '204':
+          description: Готово
+
+  /config:
+    get:
+      tags: [Config]
+      operationId: getPublicConfig
+      summary: Публічна конфігурація для frontend
+      security: []
+      responses:
+        '200':
+          description: Шрифти, ліміти, версії текстів
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicConfig'
+
+  /categories:
+    get:
+      tags: [Catalog]
+      operationId: listCategories
+      summary: Категорії каталогу
+      security: []
+      responses:
+        '200':
+          description: Категорії
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+
+  /products:
+    get:
+      tags: [Catalog]
+      operationId: listProducts
+      summary: Каталог товарів
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: categoryId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, price_asc, price_desc, popular]
+            default: newest
+      responses:
+        '200':
+          description: Товари
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+
+  /products/{productId}:
+    get:
+      tags: [Catalog]
+      operationId: getProduct
+      summary: Картка товару
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Товар
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /designs:
+    get:
+      tags: [Catalog]
+      operationId: listDesigns
+      summary: Опубліковані авторські дизайни
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: productId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: authorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, popular]
+            default: newest
+      responses:
+        '200':
+          description: Дизайни
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DesignList'
+    post:
+      tags: [Designs]
+      operationId: createDesign
+      summary: Створити чернетку
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCreateRequest'
+      responses:
+        '201':
+          description: Чернетка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Design'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /designs/mine:
+    get:
+      tags: [Designs]
+      operationId: listMyDesigns
+      summary: Мої дизайни
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DesignStatus'
+      responses:
+        '200':
+          description: Дизайни
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DesignList'
+
+  /designs/{designId}:
+    get:
+      tags: [Catalog, Designs]
+      operationId: getDesign
+      summary: Картка дизайну
+      description: Опублікований дизайн доступний усім. Чернетка або rejected доступні власнику та персоналу.
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      responses:
+        '200':
+          description: Дизайн
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Design'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Designs]
+      operationId: updateDesign
+      summary: Оновити чернетку або rejected дизайн
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignUpdateRequest'
+      responses:
+        '200':
+          description: Оновлений дизайн
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Design'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Designs]
+      operationId: deleteDesign
+      summary: Видалити чернетку або rejected дизайн
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      responses:
+        '204':
+          description: Видалено
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /designs/{designId}/fork:
+    post:
+      tags: [Designs]
+      operationId: forkDesign
+      summary: Взяти опублікований дизайн за основу
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      responses:
+        '201':
+          description: Приватна чернетка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Design'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /designs/{designId}/publish:
+    post:
+      tags: [Designs]
+      operationId: publishDesign
+      summary: Подати дизайн на модерацію
+      description: |
+        Створює незмінну версію дизайну зі статусом pending_moderation.
+        Повторна публікація вже опублікованого дизайну повертає 409.
+        Щоб змінити опублікований макет, створіть новий дизайн через fork.
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignPublishRequest'
+      responses:
+        '200':
+          description: Дизайн у черзі модерації
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Design'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /designs/{designId}/stats:
+    get:
+      tags: [Designs]
+      operationId: getDesignStats
+      summary: Статистика дизайну
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      responses:
+        '200':
+          description: Статистика
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DesignStats'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /designs/{designId}/versions:
+    get:
+      tags: [Designs]
+      operationId: listDesignVersions
+      summary: Історія версій дизайну
+      description: |
+        Власник бачить усі версії, включно зі знімками замовлень.
+        Персонал бачить усі версії. Endpoint призначений для кабінету
+        автора та модерації, публічний каталог його не викликає.
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Версії
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DesignVersionList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /designs/{designId}/reports:
+    post:
+      tags: [Designs]
+      operationId: reportDesign
+      summary: Поскаржитися на дизайн
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignReportRequest'
+      responses:
+        '201':
+          description: Скаргу створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /personalization/lists:
+    post:
+      tags: [Personalization]
+      operationId: createPersonalizationList
+      summary: Розібрати CSV/XLSX зі списком імен
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalizationCreateRequest'
+      responses:
+        '201':
+          description: Список
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalizationList'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /personalization/lists/{listId}:
+    get:
+      tags: [Personalization]
+      operationId: getPersonalizationList
+      summary: Список імен
+      parameters:
+        - $ref: '#/components/parameters/ListId'
+      responses:
+        '200':
+          description: Список
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalizationList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Personalization]
+      operationId: deletePersonalizationList
+      summary: Видалити список
+      parameters:
+        - $ref: '#/components/parameters/ListId'
+      responses:
+        '204':
+          description: Видалено
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /personalization/lists/{listId}/validate:
+    post:
+      tags: [Personalization]
+      operationId: validatePersonalizationList
+      summary: Перевірити найдовше ім'я у зоні друку
+      parameters:
+        - $ref: '#/components/parameters/ListId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalizationValidateRequest'
+      responses:
+        '200':
+          description: Результат перевірки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalizationValidation'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /uploads:
+    post:
+      tags: [Uploads]
+      operationId: createUpload
+      summary: Отримати signed URL для завантаження
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '201':
+          description: Квиток на завантаження
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTicket'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /uploads/{uploadId}:
+    get:
+      tags: [Uploads]
+      operationId: getUpload
+      summary: Статус завантаження
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+      responses:
+        '200':
+          description: Файл
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /uploads/{uploadId}/complete:
+    post:
+      tags: [Uploads]
+      operationId: completeUpload
+      summary: Завершити завантаження і перевірити файл
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+      responses:
+        '200':
+          description: Файл готовий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /files/{fileId}:
+    delete:
+      tags: [Uploads]
+      operationId: deleteFile
+      summary: Видалити невикористаний файл
+      parameters:
+        - $ref: '#/components/parameters/FileId'
+      responses:
+        '204':
+          description: Видалено
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /cart/quote:
+    post:
+      tags: [Cart]
+      operationId: quoteCart
+      summary: Розрахунок ціни, знижок, доставки та попереджень
+      security:
+        - {}
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartQuoteRequest'
+      responses:
+        '200':
+          description: Розрахунок
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartQuoteResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /delivery/cities:
+    get:
+      tags: [Delivery]
+      operationId: listDeliveryCities
+      summary: Міста Нової Пошти
+      security: []
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Міста
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeliveryCity'
+
+  /delivery/warehouses:
+    get:
+      tags: [Delivery]
+      operationId: listDeliveryWarehouses
+      summary: Відділення та поштомати
+      security: []
+      parameters:
+        - name: cityId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [branch, parcel_locker]
+      responses:
+        '200':
+          description: Відділення
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeliveryWarehouse'
+
+  /delivery/quote:
+    post:
+      tags: [Delivery]
+      operationId: quoteDelivery
+      summary: Орієнтовна вартість доставки
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryQuoteRequest'
+      responses:
+        '200':
+          description: Розрахунок
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryQuote'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Створити замовлення
+      description: |
+        Для кожного designId backend фіксує designVersionId:
+        опублікований дизайн бере currentVersionId, приватна чернетка
+        отримує новий order_snapshot. Після цього позиція замовлення
+        не залежить від подальших змін дизайну. Неопублікований авторський
+        шаблон повертає 409 DESIGN_NOT_ORDERABLE; приватна чернетка
+        власника дозволена і проходить order moderation.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreateRequest'
+      responses:
+        '201':
+          description: Замовлення створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderCreateResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    get:
+      tags: [Orders]
+      operationId: listMyOrders
+      summary: Історія замовлень
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+
+  /orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Деталі замовлення
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      operationId: cancelOrder
+      summary: Скасування до оплати
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+      responses:
+        '200':
+          description: Замовлення скасовано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /orders/{orderId}/payment:
+    post:
+      tags: [Payments]
+      operationId: retryOrderPayment
+      summary: Створити або повторити платіж
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRetryRequest'
+      responses:
+        '201':
+          description: Платіжне посилання
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /orders/{orderId}/invoice:
+    post:
+      tags: [Orders]
+      operationId: issueInvoice
+      summary: Виставити рахунок-фактуру
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCreateRequest'
+      responses:
+        '201':
+          description: Рахунок
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    get:
+      tags: [Orders]
+      operationId: getOrderInvoice
+      summary: Рахунок замовлення
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Рахунок
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{orderId}/shipment:
+    get:
+      tags: [Orders]
+      operationId: getOrderShipment
+      summary: Відправлення замовлення
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Відправлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shipment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /invoices/{invoiceId}/pdf:
+    get:
+      tags: [Orders]
+      operationId: getInvoicePdf
+      summary: PDF рахунку
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+      responses:
+        '302':
+          description: Redirect на signed URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/{paymentId}:
+    get:
+      tags: [Payments]
+      operationId: getPayment
+      summary: Статус платежу
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Платіж
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhooks/payments/{provider}:
+    post:
+      tags: [Payments]
+      operationId: paymentWebhook
+      summary: Webhook платіжного провайдера
+      description: |
+        Викликається провайдером, не frontend. Підпис перевіряється adapter-ом.
+        Для LiqPay: `application/x-www-form-urlencoded` з полями `data` і `signature`.
+        Повторний event з тим самим `event_id` не створює дубль.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [liqpay, wayforpay]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [data, signature]
+              properties:
+                data:
+                  type: string
+                signature:
+                  type: string
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Подію прийнято
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /search:
+    get:
+      tags: [Catalog]
+      operationId: searchCatalog
+      summary: Пошук по товарах і дизайнах
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 8
+      responses:
+        '200':
+          description: Результати
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /moderation/designs:
+    get:
+      tags: [Moderation]
+      operationId: listModerationDesigns
+      summary: Черга дизайнів
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_moderation, published, rejected, hidden]
+            default: pending_moderation
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Елементи черги
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationDesignList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /moderation/designs/{designId}:
+    get:
+      tags: [Moderation]
+      operationId: getModerationDesign
+      summary: Елемент черги з DPI і правами
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      responses:
+        '200':
+          description: Дизайн
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationDesign'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /moderation/designs/{designId}/decision:
+    post:
+      tags: [Moderation]
+      operationId: decideDesign
+      summary: Схвалити, відхилити, приховати або відновити дизайн
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/DesignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModerationDecisionRequest'
+      responses:
+        '200':
+          description: Оновлений дизайн
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationDesign'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /moderation/orders:
+    get:
+      tags: [Moderation]
+      operationId: listModerationOrders
+      summary: Черга замовлень
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [on_moderation, in_production]
+            default: on_moderation
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationOrderList'
+
+  /moderation/orders/{orderId}/decision:
+    post:
+      tags: [Moderation]
+      operationId: decideOrder
+      summary: Схвалити або відхилити замовлення
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderModerationDecisionRequest'
+      responses:
+        '200':
+          description: Оновлене замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /moderation/reports:
+    get:
+      tags: [Moderation]
+      operationId: listReports
+      summary: Скарги
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ReportStatus'
+      responses:
+        '200':
+          description: Скарги
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportList'
+
+  /moderation/reports/{reportId}/resolve:
+    post:
+      tags: [Moderation]
+      operationId: resolveReport
+      summary: Закрити скаргу
+      x-required-roles: [moderator, admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReportRequest'
+      responses:
+        '200':
+          description: Скарга
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: adminListUsers
+      summary: Користувачі
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/UserRole'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/UserStatus'
+      responses:
+        '200':
+          description: Користувачі
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserList'
+
+  /admin/users/{userId}:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateUser
+      summary: Змінити роль або статус
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserRequest'
+      responses:
+        '200':
+          description: Оновлений користувач
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/categories:
+    get:
+      tags: [Admin]
+      operationId: adminListCategories
+      summary: Усі категорії, включно з неактивними
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - name: includeInactive
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Категорії
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+    post:
+      tags: [Admin]
+      operationId: adminCreateCategory
+      summary: Створити категорію
+      x-required-roles: [admin, super_admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '201':
+          description: Категорія
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+
+  /admin/categories/{categoryId}:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateCategory
+      summary: Оновити категорію
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '200':
+          description: Категорія
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+    delete:
+      tags: [Admin]
+      operationId: adminDeleteCategory
+      summary: Деактивувати категорію
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '204':
+          description: Деактивовано
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/products:
+    get:
+      tags: [Admin]
+      operationId: adminListProducts
+      summary: Товари з неактивними варіантами
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: includeInactive
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Товари
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+    post:
+      tags: [Admin]
+      operationId: adminCreateProduct
+      summary: Створити товар з варіантами, зонами та знижками
+      x-required-roles: [admin, super_admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductAggregateInput'
+      responses:
+        '201':
+          description: Товар
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /admin/products/{productId}:
+    get:
+      tags: [Admin]
+      operationId: adminGetProduct
+      summary: Товар для редагування
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Товар
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+    put:
+      tags: [Admin]
+      operationId: adminReplaceProduct
+      summary: Замінити товар і вкладені сутності
+      description: |
+        Повна заміна агрегату. Відсутні у запиті варіанти, зони друку,
+        фото та знижки деактивуються. Якщо на варіант уже посилається
+        замовлення, рядок не видаляється фізично.
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductAggregateInput'
+      responses:
+        '200':
+          description: Товар
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Admin]
+      operationId: adminDeleteProduct
+      summary: Деактивувати товар
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '204':
+          description: Деактивовано
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/variants/{variantId}:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateVariantStock
+      summary: Змінити залишок або ціну варіанта
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/VariantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priceDeltaMinor:
+                  type: integer
+                  minimum: -1000000
+                  maximum: 1000000
+                stockQuantity:
+                  type: integer
+                  minimum: 0
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Варіант
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVariant'
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      operationId: adminListOrders
+      summary: Усі замовлення
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrderList'
+
+  /admin/orders/{orderId}:
+    get:
+      tags: [Admin]
+      operationId: adminGetOrder
+      summary: Замовлення з друком і платежами
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrder'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/orders/{orderId}/status:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateOrderStatus
+      summary: Змінити статус замовлення
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminOrderStatusRequest'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrder'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/orders/{orderId}/mark-paid:
+    post:
+      tags: [Admin]
+      operationId: adminMarkOrderPaid
+      summary: Підтвердити банківський переказ
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkPaidRequest'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrder'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/orders/{orderId}/refund:
+    post:
+      tags: [Admin]
+      operationId: adminRefundOrder
+      summary: Ініціювати повернення
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '200':
+          description: Замовлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrder'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/orders/{orderId}/shipment:
+    post:
+      tags: [Admin]
+      operationId: adminCreateShipment
+      summary: Створити ЕН Нової Пошти
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShipmentRequest'
+      responses:
+        '201':
+          description: Відправлення
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shipment'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /admin/orders/{orderId}/print-jobs:
+    get:
+      tags: [Admin]
+      operationId: adminListOrderPrintJobs
+      summary: Черга друку замовлення
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PrintJob'
+    post:
+      tags: [Admin]
+      operationId: adminCreatePrintJob
+      summary: Поставити замовлення в чергу друку
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '202':
+          description: Job створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrintJob'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/print-jobs/{jobId}/retry:
+    post:
+      tags: [Admin]
+      operationId: adminRetryPrintJob
+      summary: Повторити генерацію
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '202':
+          description: Job у черзі
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrintJob'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/print-queue:
+    get:
+      tags: [Admin]
+      operationId: adminListPrintQueue
+      summary: Плоский список черги друку
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: fabricType
+          in: query
+          schema:
+            type: string
+        - name: color
+          in: query
+          schema:
+            type: string
+        - name: size
+          in: query
+          schema:
+            type: string
+        - name: printJobStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/PrintJobStatus'
+      responses:
+        '200':
+          description: Позиції
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrintQueueList'
+
+  /admin/print-queue/groups:
+    get:
+      tags: [Admin]
+      operationId: adminGroupPrintQueue
+      summary: Групування за тканиною, кольором, розміром
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [fabric, color, size, product]
+            default: fabric
+      responses:
+        '200':
+          description: Групи
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrintQueueGroupList'
+
+  /admin/order-items/{orderItemId}/print-files:
+    get:
+      tags: [Admin]
+      operationId: adminListOrderItemPrintFiles
+      summary: Файли друку позиції
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderItemId'
+      responses:
+        '200':
+          description: Файли
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PrintFile'
+    post:
+      tags: [Admin]
+      operationId: adminAddPrintFile
+      summary: Додати прямий або дзеркальний файл
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/OrderItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPrintFileRequest'
+      responses:
+        '201':
+          description: Файл
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrintFile'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      operationId: adminGetStats
+      summary: Дашборд
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Метрики
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStats'
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: adminListAuditLogs
+      summary: Журнал дій
+      x-required-roles: [admin, super_admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: actorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: entityType
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Журнал
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogList'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 24
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DesignId:
+      name: designId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UploadId:
+      name: uploadId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ListId:
+      name: listId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InvoiceId:
+      name: invoiceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VariantId:
+      name: variantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrderItemId:
+      name: orderItemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Некоректний запит
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Немає або недійсний токен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Недостатньо прав
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Не знайдено
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Конфлікт стану або дубль
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Бізнес-правило не виконано
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Файл завеликий
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnsupportedMediaType:
+      description: Формат файлу не підтримується
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Перевищено ліміт
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: Зовнішній сервіс недоступний
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - CONFLICT
+            - OUT_OF_STOCK
+            - PAYLOAD_TOO_LARGE
+            - UNSUPPORTED_MEDIA_TYPE
+            - RATE_LIMITED
+            - DPI_TOO_LOW
+            - PERSONALIZATION_MISMATCH
+            - PAYMENT_FAILED
+            - COMPANY_PROFILE_INCOMPLETE
+            - INVALID_STATUS_TRANSITION
+            - DESIGN_NOT_ORDERABLE
+            - INTERNAL_ERROR
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationDetail'
+        requestId:
+          type: string
+
+    ValidationDetail:
+      type: object
+      required: [message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
+
+    Health:
+      type: object
+      required: [status, version, timestamp, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              type: string
+              enum: [ok, error]
+
+    PageMeta:
+      type: object
+      required: [page, limit, total, hasMore]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        hasMore:
+          type: boolean
+
+    UserRole:
+      type: string
+      enum: [customer, moderator, admin, super_admin]
+
+    UserStatus:
+      type: string
+      enum: [active, blocked, deleted]
+
+    DesignStatus:
+      type: string
+      enum: [draft, pending_moderation, published, rejected, hidden, archived]
+
+    OrderStatus:
+      type: string
+      enum:
+        - pending_payment
+        - paid
+        - on_moderation
+        - in_production
+        - ready_to_ship
+        - shipped
+        - delivered
+        - cancelled
+        - refunded
+
+    PaymentStatus:
+      type: string
+      enum: [pending, success, failed, refunded]
+
+    PaymentMethod:
+      type: string
+      enum: [card, bank_transfer]
+
+    PaymentProvider:
+      type: string
+      enum: [liqpay, wayforpay, bank_transfer]
+
+    FileKind:
+      type: string
+      enum:
+        - artwork
+        - vector
+        - brand_asset
+        - personalization_list
+        - print_file
+        - product_image
+        - preview
+        - invoice
+
+    FileStatus:
+      type: string
+      enum: [pending, ready, failed, deleted]
+
+    FileVisibility:
+      type: string
+      enum: [public, private]
+
+    PrintJobStatus:
+      type: string
+      enum: [queued, processing, ready, failed]
+
+    PrintFileStatus:
+      type: string
+      enum: [pending, ready, failed]
+
+    PrintFileKind:
+      type: string
+      enum: [direct, mirrored]
+
+    ReportStatus:
+      type: string
+      enum: [open, reviewing, resolved, dismissed]
+
+    ReportReason:
+      type: string
+      enum: [copyright, offensive, illegal, spam, other]
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - fullName
+        - acceptTerms
+        - acceptPrivacy
+        - termsVersion
+        - privacyVersion
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          pattern: '^(?=.*[0-9]).{8,72}$'
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 120
+        phone:
+          type: string
+          nullable: true
+        locale:
+          type: string
+          enum: [uk, en]
+          default: uk
+        acceptTerms:
+          type: boolean
+          enum: [true]
+        acceptPrivacy:
+          type: boolean
+          enum: [true]
+        termsVersion:
+          type: string
+        privacyVersion:
+          type: string
+
+    RegisterResponse:
+      type: object
+      required: [user, requiresEmailConfirmation, permissions]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        requiresEmailConfirmation:
+          type: boolean
+        accessToken:
+          type: string
+          nullable: true
+        expiresIn:
+          type: integer
+          nullable: true
+        permissions:
+          type: array
+          items:
+            type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user, permissions]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          example: 900
+        user:
+          $ref: '#/components/schemas/User'
+        permissions:
+          type: array
+          items:
+            type: string
+
+    RefreshResponse:
+      type: object
+      required: [accessToken, expiresIn]
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    User:
+      type: object
+      required: [id, email, fullName, role, status, locale, permissions, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/UserRole'
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        locale:
+          type: string
+          enum: [uk, en]
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        permissions:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    UserSummary:
+      type: object
+      required: [id, fullName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 120
+        phone:
+          type: string
+          nullable: true
+        locale:
+          type: string
+          enum: [uk, en]
+        avatarFileId:
+          type: string
+          format: uuid
+          nullable: true
+
+    CompanyProfile:
+      type: object
+      required:
+        - userId
+        - companyName
+        - legalName
+        - taxId
+        - iban
+        - bankName
+        - legalAddress
+        - contactName
+        - contactPhone
+        - contactEmail
+        - isVerified
+      properties:
+        userId:
+          type: string
+          format: uuid
+        companyName:
+          type: string
+        legalName:
+          type: string
+        taxId:
+          type: string
+        iban:
+          type: string
+        bankName:
+          type: string
+        legalAddress:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        isVerified:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+
+    CompanyProfileInput:
+      type: object
+      required:
+        - companyName
+        - legalName
+        - taxId
+        - iban
+        - bankName
+        - legalAddress
+        - contactName
+        - contactPhone
+        - contactEmail
+      properties:
+        companyName:
+          type: string
+          minLength: 2
+          maxLength: 200
+        legalName:
+          type: string
+          minLength: 2
+          maxLength: 200
+        taxId:
+          type: string
+          minLength: 8
+          maxLength: 12
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 34
+        bankName:
+          type: string
+          minLength: 2
+          maxLength: 200
+        legalAddress:
+          type: string
+          minLength: 5
+          maxLength: 300
+        contactName:
+          type: string
+          minLength: 2
+          maxLength: 120
+        contactPhone:
+          type: string
+          minLength: 10
+          maxLength: 20
+        contactEmail:
+          type: string
+          format: email
+
+    File:
+      type: object
+      required: [id, kind, status, visibility, originalName, mimeType, sizeBytes, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/FileKind'
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        visibility:
+          $ref: '#/components/schemas/FileVisibility'
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        widthPx:
+          type: integer
+          nullable: true
+        heightPx:
+          type: integer
+          nullable: true
+        dpi:
+          type: integer
+          nullable: true
+        checksumSha256:
+          type: string
+          nullable: true
+        url:
+          type: string
+          format: uri
+          nullable: true
+        urlExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        lockedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Файл використано в незмінній версії або замовленні, видалення заборонене.
+        createdAt:
+          type: string
+          format: date-time
+
+    UploadRequest:
+      type: object
+      required: [kind, filename, mimeType, sizeBytes]
+      properties:
+        kind:
+          type: string
+          enum:
+            - artwork
+            - vector
+            - brand_asset
+            - personalization_list
+            - print_file
+            - product_image
+            - preview
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 209715200
+
+    UploadTicket:
+      type: object
+      required: [uploadId, fileId, uploadUrl, method, headers, expiresAt]
+      properties:
+        uploadId:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        uploadUrl:
+          type: string
+          format: uri
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    CompleteUploadRequest:
+      type: object
+      properties:
+        checksumSha256:
+          type: string
+
+    FileList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/File'
+
+    Earnings:
+      type: object
+      required: [currency, accruedMinor, paidMinor, pendingMinor, items]
+      properties:
+        currency:
+          type: string
+          example: UAH
+        accruedMinor:
+          type: integer
+        paidMinor:
+          type: integer
+        pendingMinor:
+          type: integer
+        items:
+          type: array
+          items:
+            type: object
+            required: [designId, designTitle, amountMinor, status, createdAt]
+            properties:
+              designId:
+                type: string
+                format: uuid
+              designTitle:
+                type: string
+              amountMinor:
+                type: integer
+              status:
+                type: string
+                enum: [accrued, paid, void]
+              createdAt:
+                type: string
+                format: date-time
+
+    AuthorStats:
+      type: object
+      required: [designs, publishedDesigns, totalViews, totalOrders, totalCopies, accruedMinor, paidMinor]
+      properties:
+        designs:
+          type: integer
+        publishedDesigns:
+          type: integer
+        totalViews:
+          type: integer
+          format: int64
+        totalOrders:
+          type: integer
+          format: int64
+        totalCopies:
+          type: integer
+          format: int64
+        accruedMinor:
+          type: integer
+        paidMinor:
+          type: integer
+
+    Notification:
+      type: object
+      required: [id, type, title, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [order_status, payment, moderation, report, invoice, system]
+        title:
+          type: string
+        body:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Notification'
+
+    PublicConfig:
+      type: object
+      required:
+        - currency
+        - locales
+        - defaultLocale
+        - fonts
+        - textColors
+        - limits
+        - designDisclaimerVersion
+        - termsVersion
+        - privacyVersion
+        - paymentMethods
+        - deliveryProviders
+        - fileRules
+      properties:
+        currency:
+          type: string
+          example: UAH
+        locales:
+          type: array
+          items:
+            type: string
+            enum: [uk, en]
+        defaultLocale:
+          type: string
+          enum: [uk, en]
+        fonts:
+          type: array
+          minItems: 5
+          maxItems: 5
+          description: Рівно 5 захардкожених шрифтів, усі з кирилицею.
+          items:
+            $ref: '#/components/schemas/Font'
+        textColors:
+          type: array
+          items:
+            type: string
+            example: '#111111'
+        limits:
+          $ref: '#/components/schemas/Limits'
+        designDisclaimerVersion:
+          type: string
+        termsVersion:
+          type: string
+        privacyVersion:
+          type: string
+        paymentMethods:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentMethod'
+        deliveryProviders:
+          type: array
+          items:
+            type: string
+            enum: [nova_poshta]
+        fileRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileRule'
+
+    FileRule:
+      type: object
+      required: [kind, mimeTypes, maxBytes]
+      properties:
+        kind:
+          type: string
+          enum:
+            - artwork
+            - vector
+            - brand_asset
+            - personalization_list
+            - print_file
+            - product_image
+            - preview
+        mimeTypes:
+          type: array
+          items:
+            type: string
+        maxBytes:
+          type: integer
+
+    FontId:
+      type: string
+      enum: [inter, montserrat, pt_serif, bitter, caveat]
+      description: |
+        П'ять захардкожених шрифтів. Усі підтримують кирилицю та латиницю.
+        inter: sans; montserrat: sans; pt_serif: serif;
+        bitter: slab serif; caveat: handwriting.
+
+    FontFile:
+      type: object
+      required: [url, weight, style]
+      properties:
+        url:
+          type: string
+          format: uri
+        weight:
+          type: integer
+          minimum: 100
+          maximum: 900
+        style:
+          type: string
+          enum: [normal, italic]
+        format:
+          type: string
+          enum: [truetype, opentype]
+          default: truetype
+
+    Font:
+      type: object
+      required: [id, family, files, supportsCyrillic]
+      properties:
+        id:
+          $ref: '#/components/schemas/FontId'
+        family:
+          type: string
+        files:
+          type: array
+          minItems: 1
+          description: TTF/OTF-файли для frontend і print-worker. Однакові файли в обох.
+          items:
+            $ref: '#/components/schemas/FontFile'
+        supportsCyrillic:
+          type: boolean
+
+    Limits:
+      type: object
+      required:
+        - maxArtworkBytes
+        - maxVectorBytes
+        - maxPrintFileBytes
+        - maxPersonalizationBytes
+        - maxNames
+        - maxTextLength
+        - minDpi
+        - warningDpi
+      properties:
+        maxArtworkBytes:
+          type: integer
+          example: 20971520
+        maxVectorBytes:
+          type: integer
+          example: 52428800
+        maxPrintFileBytes:
+          type: integer
+          example: 209715200
+        maxPersonalizationBytes:
+          type: integer
+          example: 5242880
+        maxNames:
+          type: integer
+          example: 500
+        maxTextLength:
+          type: integer
+          example: 100
+        minDpi:
+          type: integer
+          example: 72
+        warningDpi:
+          type: integer
+          example: 150
+
+    Category:
+      type: object
+      required: [id, name, slug, position, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+          nullable: true
+        position:
+          type: integer
+        isActive:
+          type: boolean
+
+    CategoryInput:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        description:
+          type: string
+          nullable: true
+        position:
+          type: integer
+          default: 0
+        isActive:
+          type: boolean
+          default: true
+
+    ProductSummary:
+      type: object
+      required: [id, name, slug, basePriceMinor, currency, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        basePriceMinor:
+          type: integer
+        currency:
+          type: string
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+        productionMethod:
+          type: string
+          enum: [dtg, dtf, sublimation]
+        fabricType:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+
+    Product:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          required: [description, isCustomizable, images, variants, printAreas, discountTiers]
+          properties:
+            description:
+              type: string
+              nullable: true
+            isCustomizable:
+              type: boolean
+            images:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductImage'
+            variants:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductVariant'
+            printAreas:
+              type: array
+              items:
+                $ref: '#/components/schemas/PrintArea'
+            discountTiers:
+              type: array
+              items:
+                $ref: '#/components/schemas/DiscountTier'
+
+    ProductVariant:
+      type: object
+      required: [id, sku, colorName, colorHex, size, priceDeltaMinor, stockQuantity, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        colorName:
+          type: string
+        colorHex:
+          type: string
+        size:
+          type: string
+        priceDeltaMinor:
+          type: integer
+        stockQuantity:
+          type: integer
+        mockupUrl:
+          type: string
+          format: uri
+          nullable: true
+        isActive:
+          type: boolean
+
+    PrintArea:
+      type: object
+      required:
+        - id
+        - name
+        - widthMm
+        - heightMm
+        - offsetXMm
+        - offsetYMm
+        - mockupPxPerMm
+        - minDpi
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        widthMm:
+          type: number
+          format: float
+          description: Ширина зони друку в міліметрах.
+        heightMm:
+          type: number
+          format: float
+          description: Висота зони друку в міліметрах.
+        offsetXMm:
+          type: number
+          format: float
+          description: Зсув X від лівого верхнього кута mockup-зображення, у мм.
+        offsetYMm:
+          type: number
+          format: float
+          description: Зсув Y від лівого верхнього кута mockup-зображення, у мм.
+        mockupPxPerMm:
+          type: number
+          format: float
+          description: |
+            Скільки пікселів mockup-зображення припадає на 1 мм.
+            Усі варіанти товару мають використовувати mockup одного масштабу.
+        minDpi:
+          type: integer
+
+    ProductImage:
+      type: object
+      required: [id, url, position]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        alt:
+          type: string
+          nullable: true
+        position:
+          type: integer
+
+    DiscountTier:
+      type: object
+      required: [id, minQuantity, discountPercent, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        minQuantity:
+          type: integer
+        discountPercent:
+          type: number
+          format: float
+        isActive:
+          type: boolean
+
+    ProductList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProductSummary'
+
+    ProductAggregateInput:
+      type: object
+      required: [name, categoryId, basePriceMinor, variants, printAreas]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 140
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        categoryId:
+          type: string
+          format: uuid
+        description:
+          type: string
+          nullable: true
+        basePriceMinor:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          default: UAH
+        productionMethod:
+          type: string
+          enum: [dtg, dtf, sublimation]
+          default: dtg
+        fabricType:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+          default: true
+        isCustomizable:
+          type: boolean
+          default: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImageInput'
+        variants:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ProductVariantInput'
+        printAreas:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PrintAreaInput'
+        discountTiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscountTierInput'
+      example:
+        name: Eco Tote
+        slug: eco-tote
+        categoryId: c0000000-0000-0000-0000-000000000004
+        description: Містка бавовняна сумка для кастомного друку.
+        basePriceMinor: 42000
+        currency: UAH
+        productionMethod: dtf
+        fabricType: canvas
+        isActive: true
+        isCustomizable: true
+        images: []
+        variants:
+          - sku: TOTE-NAT-OS
+            colorName: Natural
+            colorHex: "#d9c7a3"
+            size: One size
+            priceDeltaMinor: 0
+            stockQuantity: 30
+            isActive: true
+        printAreas:
+          - name: front
+            widthMm: 300
+            heightMm: 350
+            offsetXMm: 100
+            offsetYMm: 150
+            mockupPxPerMm: 2.5
+            minDpi: 150
+        discountTiers:
+          - minQuantity: 10
+            discountPercent: 5
+            isActive: true
+
+    ProductImageInput:
+      type: object
+      required: [fileId, position]
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        fileId:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          minimum: 0
+        alt:
+          type: string
+          nullable: true
+
+    ProductVariantInput:
+      type: object
+      required: [sku, colorName, colorHex, size, stockQuantity]
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        sku:
+          type: string
+        colorName:
+          type: string
+        colorHex:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        size:
+          type: string
+        priceDeltaMinor:
+          type: integer
+          default: 0
+        stockQuantity:
+          type: integer
+          minimum: 0
+        mockupFileId:
+          type: string
+          format: uuid
+          nullable: true
+        isActive:
+          type: boolean
+          default: true
+
+    PrintAreaInput:
+      type: object
+      required: [name, widthMm, heightMm]
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        widthMm:
+          type: number
+          minimum: 1
+        heightMm:
+          type: number
+          minimum: 1
+        offsetXMm:
+          type: number
+          default: 0
+          description: Зсув X зони друку від лівого верхнього кута mockup, у мм.
+        offsetYMm:
+          type: number
+          default: 0
+          description: Зсув Y зони друку від лівого верхнього кута mockup, у мм.
+        mockupPxPerMm:
+          type: number
+          minimum: 0.1
+          default: 3.7795
+          description: |
+            Калібрування mockup: пікселів на міліметр. 96 DPI = 3.7795.
+            Усі кольорові варіанти товару мають мати mockup однакового розміру.
+        minDpi:
+          type: integer
+          minimum: 72
+          default: 150
+
+    DiscountTierInput:
+      type: object
+      required: [minQuantity, discountPercent]
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        minQuantity:
+          type: integer
+          minimum: 1
+        discountPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        isActive:
+          type: boolean
+          default: true
+
+    CanvasObjectBase:
+      type: object
+      required: [id, left, top, angle, scaleX, scaleY, zIndex]
+      properties:
+        id:
+          type: string
+          description: Унікальний ID об'єкта в межах canvas.
+        left:
+          type: number
+          description: Позиція X у пікселях canvas, від верхнього лівого кута зони друку.
+        top:
+          type: number
+          description: Позиція Y у пікселях canvas, від верхнього лівого кута зони друку.
+        scaleX:
+          type: number
+          minimum: 0.01
+          default: 1
+        scaleY:
+          type: number
+          minimum: 0.01
+          default: 1
+        angle:
+          type: number
+          minimum: -360
+          maximum: 360
+          default: 0
+          description: |
+            Будь-який кут повороту в градусах. Рендерер нормалізує його
+            до діапазону [0, 360), тому 370 і 10 дають однаковий результат.
+        zIndex:
+          type: integer
+          minimum: 0
+          description: Порядок шарів, більше значення вище.
+        opacity:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1
+        visible:
+          type: boolean
+          default: true
+        flipX:
+          type: boolean
+          default: false
+        flipY:
+          type: boolean
+          default: false
+        locked:
+          type: boolean
+          default: false
+      additionalProperties: true
+
+    ImageObject:
+      allOf:
+        - $ref: '#/components/schemas/CanvasObjectBase'
+        - type: object
+          required: [type, fileId, width, height]
+          properties:
+            type:
+              type: string
+              enum: [image]
+            fileId:
+              type: string
+              format: uuid
+              description: Канонічне посилання на files.id. Обов'язкове.
+            width:
+              type: number
+              minimum: 0.01
+              description: Ширина в пікселях canvas.
+            height:
+              type: number
+              minimum: 0.01
+              description: Висота в пікселях canvas.
+            src:
+              type: string
+              format: uri
+              nullable: true
+              description: URL для рендера в браузері. Backend для друку використовує fileId, не src.
+            cropX:
+              type: number
+              default: 0
+            cropY:
+              type: number
+              default: 0
+      description: |
+        Растрове або SVG зображення. На одному canvas можна мати кілька
+        ImageObject, кожен з власними position, scale, angle, flip і zIndex.
+
+    TextboxObject:
+      allOf:
+        - $ref: '#/components/schemas/CanvasObjectBase'
+        - type: object
+          required:
+            - type
+            - text
+            - fontFamily
+            - fontSize
+            - width
+            - height
+            - textAlign
+            - lineHeight
+          properties:
+            type:
+              type: string
+              enum: [textbox]
+            text:
+              type: string
+              minLength: 1
+              maxLength: 100
+            fontFamily:
+              $ref: '#/components/schemas/FontId'
+            fontSize:
+              type: number
+              minimum: 8
+              maximum: 200
+              default: 24
+              description: Розмір шрифту в пікселях canvas.
+            width:
+              type: number
+              minimum: 0.01
+              description: Ширина textbox у пікселях canvas.
+            height:
+              type: number
+              minimum: 0.01
+              description: Висота textbox у пікселях canvas, після переносу тексту.
+            fontWeight:
+              type: integer
+              minimum: 100
+              maximum: 900
+              default: 400
+            fontStyle:
+              type: string
+              enum: [normal, italic]
+              default: normal
+            fill:
+              type: string
+              default: '#111111'
+            textAlign:
+              type: string
+              enum: [left, center, right, justify]
+              default: left
+            lineHeight:
+              type: number
+              minimum: 0.8
+              maximum: 2.5
+              default: 1.16
+            charSpacing:
+              type: number
+              minimum: -200
+              maximum: 1000
+              default: 0
+              description: Міжлітерний інтервал у 1/1000 em, як у Fabric.js.
+            padding:
+              type: number
+              minimum: 0
+              maximum: 100
+              default: 4
+              description: Внутрішній відступ textbox у пікселях canvas.
+            splitByGrapheme:
+              type: boolean
+              default: true
+            autoWrap:
+              type: boolean
+              default: true
+      description: |
+        Smart textbox: переносить текст у межах width/height, підтримує
+        вирівнювання, міжрядковий інтервал, міжлітерний інтервал, жирність,
+        курсив, колір, padding і ті самі transform-властивості, що image.
+
+    ShapeObject:
+      allOf:
+        - $ref: '#/components/schemas/CanvasObjectBase'
+        - type: object
+          required: [type, shape]
+          properties:
+            type:
+              type: string
+              enum: [shape]
+            shape:
+              type: string
+              enum: [rect, circle, triangle, line, path]
+            width:
+              type: number
+              minimum: 0.01
+              description: Ширина в пікселях canvas.
+            height:
+              type: number
+              minimum: 0.01
+              description: Висота в пікселях canvas.
+            fill:
+              type: string
+              nullable: true
+            stroke:
+              type: string
+              nullable: true
+            strokeWidth:
+              type: number
+              minimum: 0
+              default: 0
+
+    DesignCanvasObject:
+      oneOf:
+        - $ref: '#/components/schemas/ImageObject'
+        - $ref: '#/components/schemas/TextboxObject'
+        - $ref: '#/components/schemas/ShapeObject'
+      discriminator:
+        propertyName: type
+        mapping:
+          image: '#/components/schemas/ImageObject'
+          textbox: '#/components/schemas/TextboxObject'
+          shape: '#/components/schemas/ShapeObject'
+
+    DesignCanvas:
+      type: object
+      required: [version, unit, printAreaId, widthMm, heightMm, pxPerMm, objects]
+      properties:
+        version:
+          type: string
+          example: fabric@6
+        unit:
+          type: string
+          enum: [px]
+          default: px
+          description: |
+            Усі координати та розміри об'єктів на canvas задані в пікселях canvas.
+            Міліметри отримуються як px / pxPerMm.
+        printAreaId:
+          type: string
+          format: uuid
+        widthMm:
+          type: number
+          description: Ширина canvas у мм. Має дорівнювати PrintArea.widthMm.
+        heightMm:
+          type: number
+          description: Висота canvas у мм. Має дорівнювати PrintArea.heightMm.
+        pxPerMm:
+          type: number
+          description: |
+            Пікселів canvas на 1 мм. Для 96 DPI використовуйте 3.7795.
+            Print worker масштабує в 300 DPI: printPx = mm × 300 / 25.4.
+        objects:
+          type: array
+          maxItems: 20
+          description: |
+            До 20 об'єктів на canvas (NFR-03). Кілька ImageObject і TextboxObject
+            дозволені; кожен має власні transform, angle, scale і zIndex.
+          items:
+            $ref: '#/components/schemas/DesignCanvasObject'
+      example:
+        version: fabric@6
+        unit: px
+        printAreaId: e0000000-0000-0000-0000-000000000001
+        widthMm: 300
+        heightMm: 400
+        pxPerMm: 3.7795
+        objects:
+          - type: textbox
+            id: txt-hello
+            text: HELLO
+            fontFamily: inter
+            fontSize: 80
+            fontWeight: 700
+            fontStyle: normal
+            fill: "#111111"
+            textAlign: center
+            lineHeight: 1.1
+            charSpacing: 0
+            padding: 0
+            splitByGrapheme: true
+            autoWrap: true
+            left: 100
+            top: 100
+            width: 400
+            height: 120
+            scaleX: 1
+            scaleY: 1
+            angle: 15
+            zIndex: 1
+      additionalProperties: true
+
+    DesignSummary:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - baseProduct
+        - printAreaId
+        - author
+        - viewCount
+        - orderCount
+        - copiesCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/DesignStatus'
+        previewUrl:
+          type: string
+          format: uri
+          nullable: true
+        baseProduct:
+          $ref: '#/components/schemas/ProductSummary'
+        printAreaId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/UserSummary'
+        viewCount:
+          type: integer
+          format: int64
+        orderCount:
+          type: integer
+          format: int64
+        copiesCount:
+          type: integer
+          format: int64
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Design:
+      allOf:
+        - $ref: '#/components/schemas/DesignSummary'
+        - type: object
+          properties:
+            authorBonusPercent:
+              type: number
+              readOnly: true
+              description: Видимий лише власнику та персоналу.
+            currentVersionId:
+              type: string
+              format: uuid
+              nullable: true
+              readOnly: true
+              description: Опублікована версія, яку використовують нові замовлення.
+            canvas:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/DesignCanvas'
+              nullable: true
+            rejectionReason:
+              type: string
+              nullable: true
+            hiddenReason:
+              type: string
+              nullable: true
+            rightsConfirmedAt:
+              type: string
+              format: date-time
+              nullable: true
+            rightsDocumentVersion:
+              type: string
+              nullable: true
+              description: Версія тексту підтвердження прав, видима власнику та персоналу.
+            forkedFromId:
+              type: string
+              format: uuid
+              nullable: true
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/DesignFile'
+
+    DesignFile:
+      type: object
+      required: [fileId, role, url, mimeType]
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [artwork, preview, print_ready, vector]
+        url:
+          type: string
+          format: uri
+        mimeType:
+          type: string
+        widthPx:
+          type: integer
+          nullable: true
+        heightPx:
+          type: integer
+          nullable: true
+        dpi:
+          type: integer
+          nullable: true
+
+    DesignList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/DesignSummary'
+
+    DesignCreateRequest:
+      type: object
+      required: [baseProductId, printAreaId, canvas]
+      properties:
+        baseProductId:
+          type: string
+          format: uuid
+        printAreaId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        canvas:
+          $ref: '#/components/schemas/DesignCanvas'
+        previewFileId:
+          type: string
+          format: uuid
+          nullable: true
+
+    DesignUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        canvas:
+          $ref: '#/components/schemas/DesignCanvas'
+        previewFileId:
+          type: string
+          format: uuid
+          nullable: true
+
+    DesignPublishRequest:
+      type: object
+      required: [rightsConfirmed, rightsDocumentVersion]
+      properties:
+        rightsConfirmed:
+          type: boolean
+          enum: [true]
+        rightsDocumentVersion:
+          type: string
+
+    DesignVersionStatus:
+      type: string
+      enum: [draft, pending_moderation, published, rejected, archived]
+
+    DesignVersionSource:
+      type: string
+      enum: [author, order_snapshot]
+
+    DesignVersion:
+      type: object
+      required:
+        - id
+        - designId
+        - versionNumber
+        - source
+        - status
+        - baseProductId
+        - printAreaId
+        - authorBonusPercent
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        designId:
+          type: string
+          format: uuid
+        versionNumber:
+          type: integer
+          minimum: 1
+        source:
+          $ref: '#/components/schemas/DesignVersionSource'
+        status:
+          $ref: '#/components/schemas/DesignVersionStatus'
+        baseProductId:
+          type: string
+          format: uuid
+        printAreaId:
+          type: string
+          format: uuid
+        authorBonusPercent:
+          type: number
+        previewUrl:
+          type: string
+          format: uri
+          nullable: true
+        canvas:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/DesignCanvas'
+          nullable: true
+          description: Повертається власнику та персоналу.
+        rightsConfirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rightsDocumentVersion:
+          type: string
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    DesignVersionList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/DesignVersion'
+
+    DesignStats:
+      type: object
+      required: [designId, views, orders, copies, bonusAccruedMinor, bonusPaidMinor]
+      properties:
+        designId:
+          type: string
+          format: uuid
+        views:
+          type: integer
+          format: int64
+        orders:
+          type: integer
+          format: int64
+        copies:
+          type: integer
+          format: int64
+        bonusAccruedMinor:
+          type: integer
+        bonusPaidMinor:
+          type: integer
+        last30DaysOrders:
+          type: integer
+          format: int64
+
+    DesignReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          $ref: '#/components/schemas/ReportReason'
+        details:
+          type: string
+          maxLength: 1000
+
+    CartItemInput:
+      type: object
+      required: [productId, variantId, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        designId:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 500
+        isSample:
+          type: boolean
+          default: false
+        personalizationListId:
+          type: string
+          format: uuid
+          nullable: true
+        personalizationTextElementId:
+          type: string
+          nullable: true
+
+    CartQuoteRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CartItemInput'
+        delivery:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/DeliveryQuoteRequest'
+          nullable: true
+
+    CartWarning:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - DPI_WARNING
+            - DPI_TOO_LOW
+            - OUT_OF_STOCK
+            - PERSONALIZATION_MISMATCH
+            - DESIGN_UNAVAILABLE
+            - DESIGN_NOT_ORDERABLE
+        message:
+          type: string
+        position:
+          type: integer
+          nullable: true
+
+    CartLineQuote:
+      type: object
+      required:
+        - position
+        - productId
+        - variantId
+        - quantity
+        - unitPriceMinor
+        - discountPercent
+        - lineSubtotalMinor
+        - lineDiscountMinor
+        - lineTotalMinor
+        - stockAvailable
+      properties:
+        position:
+          type: integer
+        productId:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        designId:
+          type: string
+          format: uuid
+          nullable: true
+        quantity:
+          type: integer
+        unitPriceMinor:
+          type: integer
+        discountPercent:
+          type: number
+        lineSubtotalMinor:
+          type: integer
+        lineDiscountMinor:
+          type: integer
+        lineTotalMinor:
+          type: integer
+        isSample:
+          type: boolean
+        stockAvailable:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartWarning'
+
+    CartQuoteResponse:
+      type: object
+      required:
+        - currency
+        - lines
+        - subtotalMinor
+        - discountMinor
+        - deliveryMinor
+        - totalMinor
+        - warnings
+      properties:
+        currency:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartLineQuote'
+        subtotalMinor:
+          type: integer
+        discountMinor:
+          type: integer
+        deliveryMinor:
+          type: integer
+        totalMinor:
+          type: integer
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartWarning'
+
+    DeliveryQuoteRequest:
+      type: object
+      required: [cityId, warehouseId]
+      properties:
+        cityId:
+          type: string
+        warehouseId:
+          type: string
+        items:
+          type: array
+          description: Необов'язково для точнішого розрахунку ваги.
+          items:
+            $ref: '#/components/schemas/CartItemInput'
+
+    DeliveryQuote:
+      type: object
+      required: [cityId, warehouseId, deliveryMinor, currency]
+      properties:
+        cityId:
+          type: string
+        warehouseId:
+          type: string
+        deliveryMinor:
+          type: integer
+        currency:
+          type: string
+        estimatedDaysMin:
+          type: integer
+          nullable: true
+        estimatedDaysMax:
+          type: integer
+          nullable: true
+
+    DeliveryCity:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        area:
+          type: string
+          nullable: true
+
+    DeliveryWarehouse:
+      type: object
+      required: [id, name, address, type, cityId]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        type:
+          type: string
+          enum: [branch, parcel_locker]
+        cityId:
+          type: string
+
+    PersonalizationList:
+      type: object
+      required: [id, fileName, names, rowCount, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        names:
+          type: array
+          items:
+            type: string
+        rowCount:
+          type: integer
+        status:
+          type: string
+          enum: [parsed, invalid]
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonalizationError'
+        createdAt:
+          type: string
+          format: date-time
+
+    PersonalizationError:
+      type: object
+      required: [row, message]
+      properties:
+        row:
+          type: integer
+        message:
+          type: string
+
+    PersonalizationCreateRequest:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: string
+          format: uuid
+
+    PersonalizationValidateRequest:
+      type: object
+      required: [designId, textElementId]
+      properties:
+        designId:
+          type: string
+          format: uuid
+        textElementId:
+          type: string
+
+    PersonalizationValidation:
+      type: object
+      required: [fits, longestName, recommendedFontSizePt]
+      properties:
+        fits:
+          type: boolean
+        longestName:
+          type: string
+        recommendedFontSizePt:
+          type: number
+        overflowNames:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
+
+    DeliveryInfo:
+      type: object
+      required:
+        - cityId
+        - cityName
+        - warehouseId
+        - warehouseName
+        - recipientName
+        - recipientPhone
+      properties:
+        cityId:
+          type: string
+        cityName:
+          type: string
+        warehouseId:
+          type: string
+        warehouseName:
+          type: string
+        recipientName:
+          type: string
+        recipientPhone:
+          type: string
+
+    OrderCreateRequest:
+      type: object
+      required: [items, customer, delivery, paymentMethod, disclaimerAccepted, disclaimerVersion]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CartItemInput'
+        customer:
+          type: object
+          required: [name, email, phone]
+          properties:
+            name:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+        delivery:
+          $ref: '#/components/schemas/DeliveryInfo'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        customerNote:
+          type: string
+          maxLength: 500
+          nullable: true
+        disclaimerAccepted:
+          type: boolean
+          enum: [true]
+        disclaimerVersion:
+          type: string
+      example:
+        items:
+          - productId: d0000000-0000-0000-0000-000000000001
+            variantId: 44444444-4444-4444-4444-444444444444
+            designId: f0000000-0000-0000-0000-000000000001
+            quantity: 1
+            isSample: false
+        customer:
+          name: Олена Покупець
+          email: customer@demo.dyzainer.ua
+          phone: "+380501112233"
+        delivery:
+          cityId: city-kyiv
+          cityName: Київ
+          warehouseId: wh-1
+          warehouseName: Відділення №1
+          recipientName: Олена Покупець
+          recipientPhone: "+380501112233"
+        paymentMethod: card
+        customerNote: Подарунок, без цінника.
+        disclaimerAccepted: true
+        disclaimerVersion: "2026-11-01"
+
+    OrderSummary:
+      type: object
+      required:
+        - id
+        - orderNumber
+        - status
+        - paymentStatus
+        - paymentMethod
+        - totalMinor
+        - currency
+        - itemCount
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderNumber:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        paymentStatus:
+          $ref: '#/components/schemas/PaymentStatus'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        totalMinor:
+          type: integer
+        currency:
+          type: string
+        itemCount:
+          type: integer
+        previewUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      required:
+        - id
+        - position
+        - productId
+        - variantId
+        - productName
+        - variantName
+        - unitPriceMinor
+        - quantity
+        - discountPercent
+        - lineSubtotalMinor
+        - lineDiscountMinor
+        - lineTotalMinor
+        - isSample
+        - authorBonusMinor
+      properties:
+        id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+        productId:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        designId:
+          type: string
+          format: uuid
+          nullable: true
+        designVersionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Незмінний знімок дизайну, з якого друкується ця позиція.
+        productName:
+          type: string
+        variantName:
+          type: string
+        unitPriceMinor:
+          type: integer
+        quantity:
+          type: integer
+        discountPercent:
+          type: number
+        lineSubtotalMinor:
+          type: integer
+        lineDiscountMinor:
+          type: integer
+        lineTotalMinor:
+          type: integer
+        isSample:
+          type: boolean
+        personalizationListId:
+          type: string
+          format: uuid
+          nullable: true
+        authorBonusMinor:
+          type: integer
+        printFiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrintFile'
+
+    OrderStatusEvent:
+      type: object
+      required: [toStatus, at]
+      properties:
+        fromStatus:
+          $ref: '#/components/schemas/OrderStatus'
+        toStatus:
+          $ref: '#/components/schemas/OrderStatus'
+        at:
+          type: string
+          format: date-time
+        note:
+          type: string
+          nullable: true
+
+    Order:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          required: [items, customer, delivery, timeline]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderItem'
+            customer:
+              type: object
+              required: [name, email, phone]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+            delivery:
+              $ref: '#/components/schemas/DeliveryInfo'
+            customerNote:
+              type: string
+              nullable: true
+            cancellationReason:
+              type: string
+              nullable: true
+            payment:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Payment'
+              nullable: true
+            invoice:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Invoice'
+              nullable: true
+            shipment:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Shipment'
+              nullable: true
+            timeline:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderStatusEvent'
+
+    OrderList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderSummary'
+
+    CancelOrderRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 300
+
+    PaymentRetryRequest:
+      type: object
+      properties:
+        returnUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    Payment:
+      type: object
+      required: [id, orderId, provider, method, status, amountMinor, currency, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        provider:
+          $ref: '#/components/schemas/PaymentProvider'
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        amountMinor:
+          type: integer
+        currency:
+          type: string
+        paymentUrl:
+          type: string
+          format: uri
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Invoice:
+      type: object
+      required: [id, orderId, number, status, totalMinor, currency, issuedAt, dueAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        number:
+          type: string
+        status:
+          type: string
+          enum: [issued, paid, void, overdue]
+        totalMinor:
+          type: integer
+        currency:
+          type: string
+        issuedAt:
+          type: string
+          format: date-time
+        dueAt:
+          type: string
+          format: date-time
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        pdfUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    InvoiceCreateRequest:
+      type: object
+      properties:
+        dueInDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 3
+
+    Shipment:
+      type: object
+      required: [id, orderId, provider, trackingNumber, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [nova_poshta]
+        trackingNumber:
+          type: string
+        status:
+          type: string
+          enum: [created, in_transit, delivered, returned, cancelled]
+        shippedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    OrderCreateResponse:
+      type: object
+      required: [order, payment, invoice]
+      properties:
+        order:
+          $ref: '#/components/schemas/Order'
+        payment:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Payment'
+          nullable: true
+        invoice:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Invoice'
+          nullable: true
+
+    ModerationDesign:
+      allOf:
+        - $ref: '#/components/schemas/Design'
+        - type: object
+          required: [versionId, versionNumber, versionSource, dpiInfo, reportCount]
+          properties:
+            versionId:
+              type: string
+              format: uuid
+            versionNumber:
+              type: integer
+            versionSource:
+              $ref: '#/components/schemas/DesignVersionSource'
+            dpiInfo:
+              type: object
+              required: [minDpi, images]
+              properties:
+                minDpi:
+                  type: integer
+                images:
+                  type: array
+                  items:
+                    type: object
+                    required: [fileId, widthPx, heightPx, dpi]
+                    properties:
+                      fileId:
+                        type: string
+                        format: uuid
+                      widthPx:
+                        type: integer
+                      heightPx:
+                        type: integer
+                      dpi:
+                        type: integer
+            reportCount:
+              type: integer
+
+    ModerationDesignList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModerationDesign'
+
+    ModerationOrder:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          required: [designs, paymentStatus]
+          properties:
+            designs:
+              type: array
+              items:
+                $ref: '#/components/schemas/DesignSummary'
+            payment:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Payment'
+              nullable: true
+
+    ModerationOrderList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModerationOrder'
+
+    ModerationDecisionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject, hide, restore]
+        versionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Конкретна версія. Якщо не вказано, береться поточна pending-версія.
+        reason:
+          type: string
+          maxLength: 500
+        notes:
+          type: string
+          maxLength: 1000
+
+    OrderModerationDecisionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject]
+        reason:
+          type: string
+          maxLength: 500
+
+    Report:
+      type: object
+      required: [id, designId, reporter, reason, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        designId:
+          type: string
+          format: uuid
+        designTitle:
+          type: string
+        reporter:
+          $ref: '#/components/schemas/UserSummary'
+        reason:
+          $ref: '#/components/schemas/ReportReason'
+        details:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+        resolutionAction:
+          type: string
+          enum: [none, design_hidden]
+        resolutionNote:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReportList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Report'
+
+    ResolveReportRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [dismiss, hide_design]
+        note:
+          type: string
+          maxLength: 1000
+
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            companyProfile:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/CompanyProfile'
+              nullable: true
+            ordersCount:
+              type: integer
+            designsCount:
+              type: integer
+            createdAt:
+              type: string
+              format: date-time
+
+    AdminUserList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/AdminUser'
+
+    AdminUpdateUserRequest:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/UserRole'
+        status:
+          type: string
+          enum: [active, blocked]
+        reason:
+          type: string
+          maxLength: 500
+
+    AdminOrder:
+      allOf:
+        - $ref: '#/components/schemas/Order'
+        - type: object
+          required: [user, printJobs]
+          properties:
+            user:
+              $ref: '#/components/schemas/UserSummary'
+            printJobs:
+              type: array
+              items:
+                $ref: '#/components/schemas/PrintJob'
+
+    AdminOrderList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderSummary'
+
+    AdminOrderStatusRequest:
+      type: object
+      required: [status, note]
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        note:
+          type: string
+          minLength: 3
+          maxLength: 500
+
+    MarkPaidRequest:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 3
+          maxLength: 500
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RefundRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+        amountMinor:
+          type: integer
+          minimum: 1
+          nullable: true
+
+    CreateShipmentRequest:
+      type: object
+      required: [recipientName, recipientPhone, cityId, warehouseId]
+      properties:
+        recipientName:
+          type: string
+        recipientPhone:
+          type: string
+        cityId:
+          type: string
+        warehouseId:
+          type: string
+        payerType:
+          type: string
+          enum: [recipient, sender]
+          default: recipient
+        description:
+          type: string
+          maxLength: 200
+
+    PrintJob:
+      type: object
+      required: [id, orderId, status, attempts, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PrintJobStatus'
+        attempts:
+          type: integer
+        lastError:
+          type: string
+          nullable: true
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PrintFile:
+      type: object
+      required: [id, orderItemId, kind, status, personalizationIndex, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderItemId:
+          type: string
+          format: uuid
+        designVersionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Версія, з якої згенеровано файл.
+        kind:
+          $ref: '#/components/schemas/PrintFileKind'
+        status:
+          $ref: '#/components/schemas/PrintFileStatus'
+        personalizedName:
+          type: string
+          nullable: true
+        personalizationIndex:
+          type: integer
+        fileUrl:
+          type: string
+          format: uri
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AddPrintFileRequest:
+      type: object
+      required: [fileId, kind]
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/PrintFileKind'
+        personalizedName:
+          type: string
+          nullable: true
+        personalizationIndex:
+          type: integer
+          minimum: 0
+          default: 0
+
+    PrintQueueItem:
+      type: object
+      required:
+        - orderId
+        - orderNumber
+        - orderItemId
+        - productName
+        - variantName
+        - quantity
+        - readyFiles
+        - totalFiles
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        orderNumber:
+          type: string
+        orderItemId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        variantName:
+          type: string
+        fabricType:
+          type: string
+          nullable: true
+        colorName:
+          type: string
+        size:
+          type: string
+        quantity:
+          type: integer
+        designTitle:
+          type: string
+          nullable: true
+        previewUrl:
+          type: string
+          format: uri
+          nullable: true
+        printJobStatus:
+          $ref: '#/components/schemas/PrintJobStatus'
+        readyFiles:
+          type: integer
+        totalFiles:
+          type: integer
+
+    PrintQueueList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/PrintQueueItem'
+
+    PrintQueueGroup:
+      type: object
+      required: [key, label, count, orderItemIds]
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        count:
+          type: integer
+        orderItemIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    PrintQueueGroupList:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrintQueueGroup'
+
+    AdminStats:
+      type: object
+      required:
+        - ordersToday
+        - ordersMonth
+        - revenueMonthMinor
+        - aovMinor
+        - pendingModerationDesigns
+        - pendingModerationOrders
+        - printJobsQueued
+        - printJobsFailed
+        - lowStockVariants
+        - topProducts
+        - topDesigns
+      properties:
+        ordersToday:
+          type: integer
+        ordersMonth:
+          type: integer
+        revenueMonthMinor:
+          type: integer
+        aovMinor:
+          type: integer
+        pendingModerationDesigns:
+          type: integer
+        pendingModerationOrders:
+          type: integer
+        printJobsQueued:
+          type: integer
+        printJobsFailed:
+          type: integer
+        lowStockVariants:
+          type: integer
+        topProducts:
+          type: array
+          items:
+            type: object
+            required: [id, name, orders]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              orders:
+                type: integer
+        topDesigns:
+          type: array
+          items:
+            type: object
+            required: [id, title, orders]
+            properties:
+              id:
+                type: string
+                format: uuid
+              title:
+                type: string
+              orders:
+                type: integer
+
+    AuditLog:
+      type: object
+      required: [id, action, entityType, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/UserSummary'
+          nullable: true
+        action:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+          nullable: true
+        before:
+          type: object
+          additionalProperties: true
+          nullable: true
+        after:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditLogList:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditLog'
+
+    SearchResponse:
+      type: object
+      required: [query, products, designs, totalProducts, totalDesigns]
+      properties:
+        query:
+          type: string
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSummary'
+        designs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DesignSummary'
+        totalProducts:
+          type: integer
+        totalDesigns:
+          type: integer

@@ -1,0 +1,55 @@
+{
+  "inter": {
+    "family": "Inter",
+    "supportsCyrillic": true,
+    "license": "OFL-1.1",
+    "files": [
+      {"url": "/assets/fonts/inter/Inter-400.ttf", "weight": 400, "style": "normal"},
+      {"url": "/assets/fonts/inter/Inter-700.ttf", "weight": 700, "style": "normal"},
+      {"url": "/assets/fonts/inter/Inter-Italic-400.ttf", "weight": 400, "style": "italic"},
+      {"url": "/assets/fonts/inter/Inter-Italic-700.ttf", "weight": 700, "style": "italic"}
+    ]
+  },
+  "montserrat": {
+    "family": "Montserrat",
+    "supportsCyrillic": true,
+    "license": "OFL-1.1",
+    "files": [
+      {"url": "/assets/fonts/montserrat/Montserrat-400.ttf", "weight": 400, "style": "normal"},
+      {"url": "/assets/fonts/montserrat/Montserrat-700.ttf", "weight": 700, "style": "normal"},
+      {"url": "/assets/fonts/montserrat/Montserrat-Italic-400.ttf", "weight": 400, "style": "italic"},
+      {"url": "/assets/fonts/montserrat/Montserrat-Italic-700.ttf", "weight": 700, "style": "italic"}
+    ]
+  },
+  "pt_serif": {
+    "family": "PT Serif",
+    "supportsCyrillic": true,
+    "license": "OFL-1.1",
+    "files": [
+      {"url": "/assets/fonts/pt_serif/PT_Serif-Web-Regular.ttf", "weight": 400, "style": "normal"},
+      {"url": "/assets/fonts/pt_serif/PT_Serif-Web-Bold.ttf", "weight": 700, "style": "normal"},
+      {"url": "/assets/fonts/pt_serif/PT_Serif-Web-Italic.ttf", "weight": 400, "style": "italic"},
+      {"url": "/assets/fonts/pt_serif/PT_Serif-Web-BoldItalic.ttf", "weight": 700, "style": "italic"}
+    ]
+  },
+  "bitter": {
+    "family": "Bitter",
+    "supportsCyrillic": true,
+    "license": "OFL-1.1",
+    "files": [
+      {"url": "/assets/fonts/bitter/Bitter-400.ttf", "weight": 400, "style": "normal"},
+      {"url": "/assets/fonts/bitter/Bitter-700.ttf", "weight": 700, "style": "normal"},
+      {"url": "/assets/fonts/bitter/Bitter-Italic-400.ttf", "weight": 400, "style": "italic"},
+      {"url": "/assets/fonts/bitter/Bitter-Italic-700.ttf", "weight": 700, "style": "italic"}
+    ]
+  },
+  "caveat": {
+    "family": "Caveat",
+    "supportsCyrillic": true,
+    "license": "OFL-1.1",
+    "files": [
+      {"url": "/assets/fonts/caveat/Caveat-400.ttf", "weight": 400, "style": "normal"},
+      {"url": "/assets/fonts/caveat/Caveat-700.ttf", "weight": 700, "style": "normal"}
+    ]
+  }
+}

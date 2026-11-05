@@ -1,0 +1,61 @@
+{
+  "name": "Eco Tote",
+  "slug": "eco-tote",
+  "categoryId": "c0000000-0000-0000-0000-000000000004",
+  "description": "Містка бавовняна сумка для кастомного друку.",
+  "basePriceMinor": 42000,
+  "currency": "UAH",
+  "productionMethod": "dtf",
+  "fabricType": "canvas",
+  "isActive": true,
+  "isCustomizable": true,
+  "images": [],
+  "variants": [
+    {
+      "sku": "TOTE-NAT-OS",
+      "colorName": "Natural",
+      "colorHex": "#d9c7a3",
+      "size": "One size",
+      "priceDeltaMinor": 0,
+      "stockQuantity": 30,
+      "isActive": true
+    },
+    {
+      "sku": "TOTE-BLK-OS",
+      "colorName": "Black",
+      "colorHex": "#111111",
+      "size": "One size",
+      "priceDeltaMinor": 0,
+      "stockQuantity": 30,
+      "isActive": true
+    }
+  ],
+  "printAreas": [
+    {
+      "name": "front",
+      "widthMm": 300,
+      "heightMm": 350,
+      "offsetXMm": 100,
+      "offsetYMm": 150,
+      "mockupPxPerMm": 2.5,
+      "minDpi": 150
+    }
+  ],
+  "discountTiers": [
+    {
+      "minQuantity": 10,
+      "discountPercent": 5,
+      "isActive": true
+    },
+    {
+      "minQuantity": 50,
+      "discountPercent": 10,
+      "isActive": true
+    },
+    {
+      "minQuantity": 100,
+      "discountPercent": 15,
+      "isActive": true
+    }
+  ]
+}

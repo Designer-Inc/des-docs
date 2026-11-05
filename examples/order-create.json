@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "productId": "d0000000-0000-0000-0000-000000000001",
+      "variantId": "44444444-4444-4444-4444-444444444444",
+      "designId": "f0000000-0000-0000-0000-000000000001",
+      "quantity": 1,
+      "isSample": false
+    }
+  ],
+  "customer": {
+    "name": "Олена Покупець",
+    "email": "customer@demo.dyzainer.ua",
+    "phone": "+380501112233"
+  },
+  "delivery": {
+    "cityId": "city-kyiv",
+    "cityName": "Київ",
+    "warehouseId": "wh-1",
+    "warehouseName": "Відділення №1",
+    "recipientName": "Олена Покупець",
+    "recipientPhone": "+380501112233"
+  },
+  "paymentMethod": "card",
+  "customerNote": "Подарунок, будь ласка, без цінника.",
+  "disclaimerAccepted": true,
+  "disclaimerVersion": "2026-11-01"
+}
