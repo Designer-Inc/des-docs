@@ -16,6 +16,12 @@
 
 - Нічого.
 
+## [1.0.1] - 2026-11-05
+
+### Fixed
+
+- Seed для `auth.users` тепер ініціалізує `confirmation_token`, `recovery_token`, `email_change_token_new` і `email_change`, бо hosted Supabase Auth не приймає `NULL` у цих колонках.
+
 ## [1.0.0] - 2026-11-05
 
 ### Added
