@@ -7,22 +7,17 @@
 Мінімальний порядок:
 
 ```bash
-# 1. Supabase локально
-supabase start
+# 1. Supabase hosted
+bunx supabase link --project-ref <ref>
+bunx supabase db push --remote
 
-# 2. Схема і демо-дані
-psql "$SUPABASE_DB_URL" -f database/schema.sql
-psql "$SUPABASE_DB_URL" -f database/seed.sql
-
-# 3. Backend
-# у майбутньому репозиторії des-backend
+# 2. Backend
 bun install
 bun run dev          # wrangler dev, http://localhost:8787
 
-# 4. Frontend
-# у майбутньому репозиторії des-frontend
+# 3. Frontend
 bun install
-bun run dev          # Vite, http://localhost:5173
+bun run dev          # SvelteKit/Vite, http://localhost:5173
 ```
 
 Frontend проксіює `/api` на `http://localhost:8787`, тому в коді завжди відносний шлях `/api/...`, без абсолютних URL.
@@ -56,17 +51,18 @@ c.set("user", user);
 Refresh cookie:
 
 ```text
-refresh_token=<token>; HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age=604800
+refresh_token=<token>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800
 ```
 
 - На localhost без HTTPS `Secure` треба вимкнути або запускати HTTPS через `mkcert`. Інакше браузер не збереже cookie.
-- `Path=/auth` означає, що cookie не летить на `/orders`, `/designs` та інші endpoint-и. Це правильно.
-- Frontend робить `fetch(..., { credentials: "include" })` для `/auth/*`.
+- `Path=/` потрібен, бо браузер ходить через `/api/auth/*`, а SvelteKit проксіює на `/auth/*`. Cookie same-origin, тому refresh працює і в браузері, і в SSR.
+- Не використовуйте cross-site `api.*` + `SameSite=None`: це залежить від третіх сторін і нестабільно.
+- Frontend робить `fetch(..., { credentials: "include" })` для `/api/auth/*`.
 
 CORS:
 
-- Production: Cloudflare Pages проксіює `/api/*` на Worker, тому frontend і API same-origin. CORS не потрібен.
-- Local: дозвольте рівно `http://localhost:5173` і `http://localhost:4173`.
+- Production: SvelteKit server проксіює `/api/*` на Worker, тому frontend і API same-origin. CORS не потрібен.
+- Local: Vite проксіює `/api` на `http://localhost:8787`; прямі запити до API дозволені з `http://localhost:5173` і `http://localhost:4173`.
 - Заборонено `Access-Control-Allow-Origin: *` разом із `credentials`.
 - Дозволені headers: `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Request-Id`.
 - Дозволені methods: `GET`, `POST`, `PATCH`, `PUT`, `DELETE`, `OPTIONS`.

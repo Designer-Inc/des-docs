@@ -45,7 +45,7 @@
 ## Для frontend-команди
 
 - Генеруйте типи з `openapi.yaml` (`openapi-typescript`, `orval`, `openapi-fetch`). Не пишіть типи вручну.
-- Base URL: `/api` у production (Cloudflare Pages proxy), `http://localhost:8787` локально.
+- Base URL: `/api` у production (SvelteKit server proxy) і локально (Vite proxy), `http://localhost:8787` для прямих запитів до API.
 - Авторизація: access token у пам'яті, refresh token у HttpOnly cookie. `fetch(..., { credentials: "include" })`.
 - Перехоплюйте 401 один раз, викликайте `POST /auth/refresh`, повторіть запит. Не робіть refresh-цикл.
 - Помилки: перемикайтеся на `error.code`, не на `error.message`.

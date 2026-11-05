@@ -24,7 +24,7 @@
 | User Roles | Гость, покупець, автор, модератор, адміністратор, супер-адміністратор |
 | User Personas | Олена, Андрій, Максим |
 | ER Diagram | Базові сутності `USERS`, `BASE_PRODUCTS`, `DESIGNS`, `ORDERS`, `ORDER_ITEMS`, `PAYMENTS`, `MODERATION_LOGS` |
-| System Architecture | React SPA, Fabric.js, Hono на Cloudflare Workers, Supabase Auth/Storage/PostgreSQL |
+| System Architecture | SvelteKit SSR/SSG, Fabric.js, Hono на Cloudflare Workers, Supabase Auth/Storage/PostgreSQL |
 
 Рішення, які в джерелах були позначені як TBD, зафіксовані в розділі 2.4. Якщо команда змінює рішення, змінюється цей документ, потім `openapi.yaml`, потім `schema.sql`.
 
@@ -82,14 +82,14 @@
 
 | Шар | Технології |
 | --- | --- |
-| Frontend | React 18, TypeScript, Vite, Fabric.js 6, Zustand, Tailwind CSS, Shadcn/UI, React Router |
+| Frontend | SvelteKit 2, Svelte 5, TypeScript, Vite, Fabric.js 6, Tailwind CSS |
 | Backend | Hono, TypeScript, Cloudflare Workers, Zod для валідації, JWT guard |
 | Дані | Supabase PostgreSQL 15+, Supabase Auth, Supabase Storage |
 | Платежі | LiqPay hosted page, adapter `PaymentProvider` |
 | Доставка | Нова Пошта API |
 | Email | Resend |
-| CI/CD | GitHub Actions, Cloudflare Pages, Wrangler |
-| Локально | Supabase CLI, Docker, `wrangler dev` |
+| CI/CD | GitHub Actions, Cloudflare Workers, Wrangler |
+| Локально | Supabase hosted, `wrangler dev`, `vite dev` |
 
 ### 1.6 Бізнес-цілі та KPI
 

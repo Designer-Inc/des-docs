@@ -6,8 +6,8 @@
 
 | Сервіс | Безкоштовний ліміт | Що це означає |
 | --- | --- | --- |
-| Cloudflare Workers | ~100 000 запитів/день, ~10 мс CPU на запит | Hono API і легкі запити працюють. Важкий рендер зображень не працює |
-| Cloudflare Pages | ~500 білдів/місяць | Frontend і preview-деплої |
+| Cloudflare Workers | ~100 000 запитів/день, ~10 мс CPU на запит | Hono API і SvelteKit SSR. Каталог краще prerender-ити або кешувати. Важкий рендер зображень не працює |
+| Cloudflare Pages | ~500 білдів/місяць | Опційні preview-деплої; production frontend — Workers |
 | Cloudflare R2 | ~10 ГБ, 1 млн Class A, 10 млн Class B/місяць, egress без плати | Сховище для print-ready та рахунків |
 | Supabase DB | ~500 МБ | 29 таблиць і текстові дані вміщаються. Файли не в БД |
 | Supabase Storage | ~1 ГБ | Мало для print-ready. Тільки прев'ю, аватари, товарні фото |
@@ -84,7 +84,7 @@ Cloudflare Rate Limiting може бути обмежений на free plan. Д
 
 ```mermaid
 flowchart LR
-  FE["Cloudflare Pages<br/>React + Fabric.js"] --> API["Cloudflare Workers<br/>Hono REST"]
+  FE["Cloudflare Workers<br/>SvelteKit SSR/SSG"] --> API["Cloudflare Workers<br/>Hono REST"]
   API --> AUTH["Supabase Auth"]
   API --> DB["Supabase PostgreSQL<br/>500 MB"]
   API --> ST["Supabase Storage<br/>previews, avatars"]
@@ -96,6 +96,8 @@ flowchart LR
   GH --> R2
   GH --> API
 ```
+
+SvelteKit і Hono — окремі Worker-и. SvelteKit проксіює `/api/*` на API Worker, тому браузер бачить один origin. Публічний каталог краще prerender-ити або кешувати: безкоштовний Workers має ~10 мс CPU.
 
 ## 4. Зміни до контракту, які варто зробити
 
@@ -143,7 +145,7 @@ flowchart LR
 ## 7. Чек-лист запуску
 
 1. Supabase: створити проєкт, застосувати `database/schema.sql`, увімкнути Auth, налаштувати SMTP Resend.
-2. Cloudflare: створити Pages, Workers, R2 bucket, env vars. `service_role` тільки в Workers secrets.
+2. Cloudflare: створити Workers для frontend і API, R2 bucket, env vars. `service_role` тільки в Workers secrets.
 3. R2: bucket `print-files`, `invoices`, lifecycle 30 днів для print, CORS для signed upload.
 4. GitHub: secrets `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `R2_*`, `RESEND_API_KEY`, `LIQPAY_*`, `NOVA_POSHTA_*`.
 5. GitHub Actions: keepalive, db-backup, render-worker.
@@ -231,12 +233,12 @@ jobs:
 
 | Стаття | Вартість |
 | --- | --- |
-| Cloudflare Pages, Workers, R2 | $0 у межах лімітів |
+| Cloudflare Workers, R2 | $0 у межах лімітів |
 | Supabase DB, Auth, Storage | $0 у межах лімітів |
 | Resend | $0 до 100 листів/день |
 | GitHub Actions | $0 у межах 2 000 хв або публічний репозиторій |
 | LiqPay sandbox, Нова Пошта test | $0 |
-| Домен | окремо, можна `*.pages.dev` |
+| Домен | окремо, `designer.r0ma.top` |
 
 ## 10. Ризики
 

@@ -16,6 +16,19 @@
 
 - Нічого.
 
+## [1.1.0] - 2026-11-05
+
+### Added
+
+- ADR-0006: SvelteKit 2 з гібридним SSR/SSG/CSR.
+
+### Changed
+
+- Frontend stack: React SPA → SvelteKit 2, Svelte 5, Vite, Fabric.js 6.
+- Production API base URL: same-origin `/api` через SvelteKit server proxy; CORS у production не потрібен.
+- Refresh cookie: `Path=/` для same-origin `/api/auth/*`.
+- Frontend deploy: Cloudflare Workers замість статичного Cloudflare Pages.
+
 ## [1.0.1] - 2026-11-05
 
 ### Fixed
