@@ -1,8 +1,20 @@
 # AGENTS.md — des-docs
 
-Це **контрактний** репозиторій проєкту «Дизайнер». Тут немає app-коду: тільки специфікація, OpenAPI, схема БД, seed, ER, ADR, приклади й шрифти.
+## Призначення файлу
 
-`des-docs` — джерело істини для `des-backend` і `des-frontend`. Зміна API або схеми починається тут, а не в app-репозиторіях.
+Цей файл описує, **як агенти працюють з репозиторієм**. Це не звіт про поточний стан, не список фіч і не changelog.
+
+Не оновлюй цей файл під кожну версію, фічу чи зміну стану. Актуальні версії, статус і перелік змін читай у:
+
+- `README.md`
+- `CHANGELOG.md`
+- `openapi.yaml`
+- `PRODUCT_SPEC.md`
+- `git tag --list 'contract-*'`
+
+`des-docs` — контрактний репозиторій проєкту «Дизайнер»: продуктова специфікація, OpenAPI, схема PostgreSQL, seed, ER, ADR, приклади, шрифти. Тут немає app-коду.
+
+Це джерело істини для app-репозиторіїв. Зміна API, схеми або бізнес-правила починається тут.
 
 ## Спочатку прочитай
 
@@ -12,65 +24,60 @@
 - `database/schema.sql`
 - `database/seed.sql`
 - `adr/0006-sveltekit-hybrid.md`
-- `DEVELOPMENT.md`
 - `CONTRIBUTING.md`
 - `CHANGELOG.md`
 
-## Порядок змін
+Не покладайся на цей файл як на джерело поточного стану.
 
-Одна логічна зміна — один PR. Порядок:
+## Як змінювати контракт
 
-1. `PRODUCT_SPEC.md`, якщо змінюється поведінка або бізнес-правило.
-2. `openapi.yaml`.
-3. `database/schema.sql` + план міграції.
-4. `database/seed.sql`.
-5. `examples/`, документація, `CHANGELOG.md`.
-
-Не змінюй OpenAPI або schema тільки в app-репозиторії. Не редагуй опубліковані ADR; додавай новий ADR, який замінює потрібну частину.
+- Одна логічна зміна — один PR.
+- Порядок: `PRODUCT_SPEC.md` → `openapi.yaml` → `database/schema.sql` → `database/seed.sql` → `examples/`, документація, `CHANGELOG.md`.
+- Не змінюй API або schema тільки в app-репозиторії.
+- ADR є незмінними. Якщо рішення змінюється, додай новий ADR, який замінює відповідну частину старого.
+- Seed має виконуватися і на hosted Supabase, і на локальній schema-stub. Умовність для auth-колонок зберігай.
+- Не додавай сюди реалізацію, deployment-конфіги або код застосунків.
 
 ## Команди
 
+Використовуй Bun і наявний lockfile. Не переходь на npm/pnpm/yarn.
+
 ```bash
 bun install
-bun run check       # redocly lint + openapi-typescript
-bun run build:docs  # dist/index.html
+bun run check
+bun run build:docs
 bun run preview:docs
 ```
 
-`.tmp/` і `dist/` — generated, не комітити.
+`.tmp/` і `dist/` — generated. Не коміть їх і не редагуй згенеровані файли вручну.
 
-## CI
+CI описаний у `.github/workflows/docs.yml`. Обов'язкові перевірки та review налаштовані в branch protection; не дублюй їхній поточний список у цьому файлі.
 
-`.github/workflows/docs.yml`:
+## PR і реліз
 
-- `validate` — OpenAPI lint, schema + seed у чистому PostgreSQL, Markdown links;
-- `build` — збірка HTML-документації.
+- Працюй у гілці, відкривай PR у `main`. Не пуш напряму в `main`.
+- Дочекайся зелених обов'язкових перевірок і review/CODEOWNER.
+- Conventional Commits. Без force-push і без переписування тегів.
+- Після merge контрактного PR створи tag `contract-vX.Y.Z`.
+- App-репозиторії оновлюють copy контракту з цього tag, а не з `main` напряму.
 
-Обидва jobs обов'язкові для PR.
+Якщо PR з форка, workflows можуть вимагати ручного approve від maintainer. Не вважай, що перевірки запустяться самі.
 
-## Правила
+## Безпека
 
-- Репозиторій публічний. Не додавай секрети, токени, приватні ключі, персональні дані.
-- Seed має працювати і на hosted Supabase, і на локальній schema-stub. Оновлення auth token-колонок умовне.
-- OpenAPI production server — same-origin `/api`; локально `http://localhost:8787`.
-- Refresh cookie: `HttpOnly; Secure; SameSite=Lax; Path=/`.
-- Не редагуй згенерований `.tmp/api.d.ts`.
-- Не роби destructive schema-змін без міграційного плану.
-- Не пуш у `main`: branch protection вимагає PR, `build` + `validate`, 1 review і CODEOWNER.
-- Conventional Commits. Не роби force-push і не переписуй теги.
+Репозиторій публічний. Не додавай:
 
-## Після merge
+- секрети, токени, приватні ключі;
+- персональні дані;
+- реальні production-конфіги з credentials.
 
-1. Постав tag `contract-vX.Y.Z`.
-2. В app-репозиторіях онови copy:
+Приклади та документація мають містити тільки placeholders.
 
-```bash
-# у des-backend
-scripts/sync-contract.sh contract-vX.Y.Z
-```
+## Заборонено
 
-Поточна версія на 2026-11-05 — `contract-v1.1.2`; перевіряй останню:
-
-```bash
-git tag --list 'contract-*' | sort -V | tail -1
-```
+- Додавати app-код або інфраструктурні конфіги застосунків.
+- Робити destructive schema-зміни без міграційного плану.
+- Редагувати опубліковані ADR замість створення нового.
+- Комітити `node_modules/`, `dist/`, `.tmp/`.
+- Пушити в `main`, робити force-push або переписувати теги.
+- Дублювати в цьому файлі поточні версії, список endpoint-ів або статус фіч.
