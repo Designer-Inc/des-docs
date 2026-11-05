@@ -563,7 +563,7 @@ stateDiagram-v2
 
 ### 7.1 Формат
 
-- Base URL: `https://api.dyzainer.ua`, локально `http://localhost:8787`.
+- Base URL: `/api` у production (same-origin SvelteKit proxy), `http://localhost:8787` локально.
 - JSON, UTF-8, camelCase у JSON, snake_case у БД.
 - Дати ISO 8601 UTC: `2026-11-05T12:00:00Z`.
 - Гроші: ціле число в копійках, поле `*Minor`, плюс `currency: "UAH"`.
@@ -604,7 +604,7 @@ stateDiagram-v2
 ### 7.5 Автентифікація
 
 - Access JWT: 15 хвилин, `Authorization: Bearer <token>`.
-- Refresh token: 7 діб, HttpOnly, Secure, SameSite=Lax, Path=/auth.
+- Refresh token: 7 діб, HttpOnly, Secure, SameSite=Lax, Path=/.
 - Access token зберігається в пам'яті frontend. localStorage не використовується.
 - `POST /auth/refresh` ротирує refresh token.
 - Ролі перевіряються на backend. `sub` JWT це UUID користувача, роль береться з `public.users`, не з `user_metadata`. OpenAPI позначає потрібні ролі розширенням `x-required-roles`.

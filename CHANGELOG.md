@@ -16,6 +16,18 @@
 
 - Нічого.
 
+## [1.1.2] - 2026-11-05
+
+### Fixed
+
+- Seed: оновлення token-колонок `auth.users` виконується лише коли hosted GoTrue-колонки існують. Це повертає зеленый docs CI на локальній schema-stub.
+- OpenAPI production server: same-origin `/api` замість `api.dyzainer.ua`.
+- `PRODUCT_SPEC`: refresh cookie `Path=/`; `FREE_TIER`: keepalive на `api.designer.r0ma.top`.
+
+### Changed
+
+- Локальний setup застосовує demo seed через `db push --include-seed`.
+
 ## [1.1.1] - 2026-11-05
 
 ### Changed

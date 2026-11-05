@@ -19,8 +19,8 @@ info:
   license:
     name: Educational project
 servers:
-  - url: https://api.dyzainer.ua
-    description: Production
+  - url: /api
+    description: Production same-origin (SvelteKit proxy)
   - url: http://localhost:8787
     description: Local Hono worker
 tags:
@@ -118,7 +118,7 @@ paths:
             Set-Cookie:
               schema:
                 type: string
-              description: refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/auth
+              description: refresh_token=...; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:

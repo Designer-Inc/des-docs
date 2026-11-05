@@ -109,18 +109,30 @@ end $$;
 
 -- Hosted GoTrue читає token-колонки як text. Прямий INSERT у auth.users
 -- залишає їх NULL, і login/admin API падають з "Database error querying schema".
-update auth.users
-set confirmation_token = coalesce(confirmation_token, ''),
-    recovery_token = coalesce(recovery_token, ''),
-    email_change_token_new = coalesce(email_change_token_new, ''),
-    email_change = coalesce(email_change, '')
-where id in (
-  '11111111-1111-1111-1111-111111111111',
-  '22222222-2222-2222-2222-222222222222',
-  '33333333-3333-3333-3333-333333333333',
-  '44444444-4444-4444-4444-444444444444',
-  '55555555-5555-5555-5555-555555555555'
-);
+-- Локальна schema-stub не має цих колонок, тому update умовний.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'auth'
+      and table_name = 'users'
+      and column_name = 'confirmation_token'
+  ) then
+    update auth.users
+    set confirmation_token = coalesce(confirmation_token, ''),
+        recovery_token = coalesce(recovery_token, ''),
+        email_change_token_new = coalesce(email_change_token_new, ''),
+        email_change = coalesce(email_change, '')
+    where id in (
+      '11111111-1111-1111-1111-111111111111',
+      '22222222-2222-2222-2222-222222222222',
+      '33333333-3333-3333-3333-333333333333',
+      '44444444-4444-4444-4444-444444444444',
+      '55555555-5555-5555-5555-555555555555'
+    );
+  end if;
+end $$;
 
 -- Email-identity для Supabase Auth. У нових версіях GoTrue login за email
 -- може вимагати рядок у auth.identities, а не лише auth.users.

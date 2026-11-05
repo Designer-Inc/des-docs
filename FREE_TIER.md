@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health
-        run: curl -fsS https://api.dyzainer.ua/health
+        run: curl -fsS https://api.designer.r0ma.top/health
 ```
 
 ### Backup

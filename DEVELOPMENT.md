@@ -9,7 +9,7 @@
 ```bash
 # 1. Supabase hosted
 bunx supabase link --project-ref <ref>
-bunx supabase db push --remote
+bunx supabase db push --remote --include-seed  # seed — demo only
 
 # 2. Backend
 bun install
