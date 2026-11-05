@@ -10,7 +10,7 @@
 
 ## Рішення
 
-- Frontend: SvelteKit 2, Svelte 5, TypeScript, Vite, Tailwind CSS, Fabric.js 6.
+- Frontend: SvelteKit 3, Svelte 5, TypeScript, Vite, Tailwind CSS, Fabric.js 6.
 - Гібридний рендеринг:
   - `/`, `/catalog`, `/product/*` — prerender або SSR з кешуванням;
   - `/editor`, `/account`, `/admin`, `/cart`, `/checkout` — CSR;

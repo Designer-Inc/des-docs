@@ -82,7 +82,7 @@
 
 | Шар | Технології |
 | --- | --- |
-| Frontend | SvelteKit 2, Svelte 5, TypeScript, Vite, Fabric.js 6, Tailwind CSS |
+| Frontend | SvelteKit 3, Svelte 5, TypeScript, Vite, Fabric.js 6, Tailwind CSS |
 | Backend | Hono, TypeScript, Cloudflare Workers, Zod для валідації, JWT guard |
 | Дані | Supabase PostgreSQL 15+, Supabase Auth, Supabase Storage |
 | Платежі | LiqPay hosted page, adapter `PaymentProvider` |
